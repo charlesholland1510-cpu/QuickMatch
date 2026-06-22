@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QuickMatch</title>
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/simple-peer@9.11.1/simplepeer.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --ink:#0f1117;--ink2:#3d4149;--ink3:#7a7f8a;--ink4:#b0b4be;
+  --line:#e2e4e9;--white:#fff;--bg:#f0f2f7;
+  --accent:#1a56db;--accent-h:#1447c0;--accent-m:#eef2fd;
+  --green:#16a34a;--red:#dc2626;--amber:#d97706;
+  --r:8px;--rl:14px
+}
+body{font-family:'Inter',-apple-system,sans-serif;background:var(--bg);color:var(--ink);min-height:100vh;display:flex;align-items:center;justify-content:center;font-size:14px;line-height:1.5}
+#app{width:100%;max-width:980px;padding:2rem}
+.screen{display:none}.screen.active{display:flex;flex-direction:column}
+
+/* ── SETUP ── */
+#screen-setup{
+  max-width:420px;margin:0 auto;
+  background:var(--white);border:1px solid var(--line);
+  border-radius:20px;padding:2rem 2rem 1.75rem;gap:1.25rem;
+  box-shadow:0 2px 20px rgba(0,0,0,.07)
+}
+.wordmark{font-size:20px;font-weight:700;letter-spacing:-0.5px}
+.wordmark span{color:var(--accent)}
+.setup-sub{font-size:13px;color:var(--ink3);margin-top:-6px}
+
+/* Segmented role toggle — one control, not two "forms" */
+.role-toggle{
+  display:grid;grid-template-columns:1fr 1fr;
+  background:var(--bg);border:1px solid var(--line);
+  border-radius:10px;padding:3px;gap:3px
+}
+.role-tab{
+  border:none;border-radius:8px;padding:10px 8px;
+  background:transparent;cursor:pointer;font-family:inherit;
+  color:var(--ink3);text-align:center;transition:all .15s
+}
+.role-tab-title{font-size:13px;font-weight:600;display:block;margin-bottom:1px}
+.role-tab-sub{font-size:11px;display:block;opacity:.75}
+.role-tab.sel{background:var(--white);color:var(--accent);box-shadow:0 1px 5px rgba(0,0,0,.1)}
+.role-tab.sel .role-tab-sub{opacity:.7}
+
+/* Form fields */
+.field{display:flex;flex-direction:column;gap:5px}
+.lbl{font-size:12px;font-weight:500;color:var(--ink2)}
+.lbl-opt{color:var(--ink4);font-weight:400}
+input[type=text]{
+  border:1px solid var(--line);border-radius:var(--r);
+  padding:9px 12px;font-size:14px;color:var(--ink);
+  outline:none;background:var(--white);width:100%;font-family:inherit;
+  transition:border-color .15s,box-shadow .15s
+}
+input[type=text]:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(26,86,219,.09)}
+input[type=text]::placeholder{color:var(--ink4)}
+.tag-row{display:flex;gap:6px}.tag-row input{flex:1}
+.btn-ghost{
+  background:var(--white);border:1px solid var(--line);border-radius:var(--r);
+  padding:9px 14px;font-size:13px;font-weight:500;color:var(--ink2);
+  cursor:pointer;font-family:inherit;white-space:nowrap;transition:background .12s
+}
+.btn-ghost:hover{background:var(--bg)}
+.tags{display:flex;flex-wrap:wrap;gap:5px;min-height:0}
+.tag{
+  background:var(--accent-m);color:var(--accent);border:none;
+  border-radius:5px;padding:3px 9px;font-size:12px;font-weight:500;
+  cursor:pointer;font-family:inherit;transition:opacity .1s
+}
+.tag:hover{opacity:.75}
+.btn-primary{
+  background:var(--accent);color:var(--white);border:none;
+  border-radius:var(--r);padding:11px 18px;font-size:14px;font-weight:600;
+  cursor:pointer;width:100%;font-family:inherit;letter-spacing:-.1px;
+  transition:background .15s,box-shadow .15s;margin-top:4px
+}
+.btn-primary:hover:not(:disabled){background:var(--accent-h);box-shadow:0 2px 12px rgba(26,86,219,.3)}
+.btn-primary:disabled{background:var(--line);color:var(--ink4);cursor:not-allowed;box-shadow:none}
+
+/* ── WAITING ── */
+#screen-waiting{align-items:center;justify-content:center;min-height:500px;gap:14px;text-align:center}
+.spin{width:40px;height:40px;border-radius:50%;border:2.5px solid var(--line);border-top-color:var(--accent);animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.wait-title{font-size:17px;font-weight:600;letter-spacing:-.2px}
+.wait-sub{font-size:13px;color:var(--ink3)}
+.queue-pos{font-size:12px;color:var(--ink4)}
+.btn-link{background:none;border:none;color:var(--ink3);font-size:13px;cursor:pointer;font-family:inherit;text-decoration:underline;margin-top:4px}
+.btn-link:hover{color:var(--ink)}
+
+/* ── ROOM ── */
+#screen-room{gap:0}
+.room-shell{
+  display:grid;grid-template-columns:1fr 276px;
+  border-radius:var(--rl);overflow:hidden;
+  border:1px solid #181d28;background:#0b0e15;
+  min-height:560px
+}
+.room-main{display:flex;flex-direction:column;position:relative}
+
+/* Full-area peer video */
+.video-main{
+  flex:1;position:relative;
+  background:#111520;
+  display:flex;align-items:center;justify-content:center;
+  overflow:hidden;min-height:440px
+}
+.video-main>video#vid-peer{
+  position:absolute;inset:0;
+  width:100%;height:100%;object-fit:cover
+}
+/* Peer placeholder */
+.vm-ph{display:flex;flex-direction:column;align-items:center;gap:12px;z-index:1;pointer-events:none}
+.vm-avatar{
+  width:76px;height:76px;border-radius:50%;
+  border:1.5px solid rgba(255,255,255,.1);
+  background:rgba(255,255,255,.05);
+  display:flex;align-items:center;justify-content:center
+}
+.vm-name{font-size:14px;color:rgba(255,255,255,.45);font-weight:500}
+.vm-subt{font-size:12px;color:rgba(255,255,255,.22)}
+/* Peer label bottom-left */
+.peer-label{
+  position:absolute;bottom:14px;left:14px;z-index:5;
+  font-size:12px;font-weight:500;color:rgba(255,255,255,.88);
+  background:rgba(0,0,0,.52);padding:4px 10px 4px 8px;
+  border-radius:6px;display:flex;align-items:center;gap:7px;
+  backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)
+}
+.live-dot{width:7px;height:7px;background:var(--green);border-radius:50%;flex-shrink:0}
+
+/* Self PiP — bottom-right corner of video-main */
+.video-pip{
+  position:absolute;bottom:14px;right:14px;z-index:10;
+  width:164px;aspect-ratio:4/3;
+  border-radius:10px;overflow:hidden;
+  border:2px solid rgba(255,255,255,.14);
+  background:#0b0e15;
+  box-shadow:0 4px 20px rgba(0,0,0,.5)
+}
+.video-pip video{width:100%;height:100%;object-fit:cover;display:block}
+.pip-ph{
+  position:absolute;inset:0;display:none;
+  align-items:center;justify-content:center;flex-direction:column;gap:6px;
+  background:#0b0e15
+}
+.pip-ph .pip-icon{
+  width:34px;height:34px;border-radius:50%;
+  border:1px solid rgba(255,255,255,.12);
+  background:rgba(255,255,255,.04);
+  display:flex;align-items:center;justify-content:center
+}
+.pip-label{
+  position:absolute;bottom:6px;left:8px;z-index:2;
+  font-size:10px;font-weight:500;
+  color:rgba(255,255,255,.65);
+  background:rgba(0,0,0,.42);padding:2px 6px;border-radius:4px
+}
+
+/* Controls */
+.ctrl-bar{
+  height:58px;background:#090c12;
+  display:flex;align-items:center;justify-content:center;gap:10px;
+  border-top:1px solid #181d28;
+  position:relative;z-index:20;flex-shrink:0
+}
+.ctrl-btn{
+  width:40px;height:40px;border-radius:50%;border:none;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  transition:opacity .12s,transform .1s,background .15s;
+  color:rgba(255,255,255,.8)
+}
+.ctrl-btn:active{transform:scale(.91)}
+.ctrl-btn.neutral{background:#1c2132}.ctrl-btn.neutral:hover{background:#252b3d}
+.ctrl-btn.muted{background:#1c2132;opacity:.38}
+.ctrl-btn.danger{background:var(--red)}.ctrl-btn.danger:hover{background:#b91c1c}
+.ctrl-btn.warn{background:#6b2f00;color:#fff}.ctrl-btn.warn:hover{background:#92400e}
+.ci{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.ctrl-divider{width:1px;height:24px;background:#1c2132;margin:0 2px}
+
+/* Sidebar */
+.sidebar{
+  background:#0e1219;border-left:1px solid #181d28;
+  display:flex;flex-direction:column;overflow:hidden
+}
+.sb-head{padding:16px 16px 14px;border-bottom:1px solid #181d28;flex-shrink:0}
+.sb-eyebrow{font-size:10px;color:rgba(255,255,255,.22);text-transform:uppercase;letter-spacing:.9px;margin-bottom:9px}
+.sb-name{font-size:15px;font-weight:600;color:rgba(255,255,255,.9);margin-bottom:2px}
+.sb-role{font-size:12px;color:#5b7fd4;margin-bottom:9px}
+.skill-pill{
+  display:inline-block;font-size:11px;
+  background:rgba(26,86,219,.15);color:#7da3e8;
+  padding:2px 7px;border-radius:4px;margin:2px 2px 0 0
+}
+.sb-rate{font-size:12px;color:rgba(255,255,255,.25);margin-top:10px}
+.sb-chat{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.chat-msgs{flex:1;overflow-y:auto;padding:12px 14px;display:flex;flex-direction:column;gap:9px}
+.chat-msgs::-webkit-scrollbar{width:3px}.chat-msgs::-webkit-scrollbar-thumb{background:#262b3b;border-radius:2px}
+.cmsg{font-size:12px;line-height:1.55;color:rgba(255,255,255,.55)}.cmsg.me{color:#7da3e8}
+.cmsg .who{font-weight:600;margin-right:5px}
+.chat-typing{font-size:11px;color:rgba(255,255,255,.18);padding:3px 14px;height:20px;flex-shrink:0}
+.chat-in{display:flex;gap:6px;padding:10px 12px;border-top:1px solid #181d28;flex-shrink:0}
+.chat-in input{
+  flex:1;background:#181d28;border:1px solid #252b3d;
+  border-radius:6px;padding:7px 10px;font-size:12px;
+  color:rgba(255,255,255,.85);outline:none;font-family:inherit
+}
+.chat-in input::placeholder{color:rgba(255,255,255,.2)}
+.chat-in input:focus{border-color:#3b5fc0}
+.chat-send{
+  background:var(--accent);border:none;border-radius:6px;
+  width:32px;cursor:pointer;display:flex;align-items:center;
+  justify-content:center;flex-shrink:0;transition:background .12s
+}
+.chat-send:hover{background:var(--accent-h)}
+
+/* Notes overlay */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;display:flex;align-items:center;justify-content:center}
+.overlay-card{background:var(--white);border-radius:var(--rl);padding:1.5rem;width:360px;box-shadow:0 8px 40px rgba(0,0,0,.22)}
+.overlay-title{font-size:15px;font-weight:600;margin-bottom:4px}
+.overlay-sub{font-size:12px;color:var(--ink3);margin-bottom:12px}
+textarea.notes-ta{width:100%;border:1px solid var(--line);border-radius:var(--r);padding:10px 12px;font-size:13px;color:var(--ink);resize:none;height:120px;outline:none;font-family:inherit;line-height:1.6}
+textarea.notes-ta:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(26,86,219,.09)}
+.overlay-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
+.overlay-actions button{font-family:inherit;font-size:13px;font-weight:500;padding:8px 16px;border-radius:var(--r);cursor:pointer}
+.btn-save{background:var(--accent);color:#fff;border:none;transition:background .12s}.btn-save:hover{background:var(--accent-h)}
+.btn-cancel{background:var(--white);color:var(--ink2);border:1px solid var(--line);transition:background .12s}.btn-cancel:hover{background:var(--bg)}
+
+/* Verdict */
+#screen-verdict{align-items:center;justify-content:center;min-height:500px;gap:1.25rem;text-align:center}
+.verdict-title{font-size:20px;font-weight:700;letter-spacing:-.4px}
+.verdict-sub{font-size:13px;color:var(--ink3)}
+.verdict-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;width:100%;max-width:420px}
+.verdict-btn{
+  background:var(--white);border:1.5px solid var(--line);
+  border-radius:var(--rl);padding:1rem;cursor:pointer;text-align:left;
+  transition:border-color .15s,background .15s;font-family:inherit
+}
+.verdict-btn:hover,.verdict-btn.chosen{border-color:var(--accent);background:var(--accent-m)}
+.vb-dot{width:8px;height:8px;border-radius:50%;margin-bottom:10px}
+.vb-title{font-size:13px;font-weight:600;color:var(--ink)}
+.vb-desc{font-size:11px;color:var(--ink3);margin-top:2px}
+.note-preview{
+  max-width:420px;width:100%;
+  background:var(--accent-m);border-left:3px solid var(--accent);
+  border-radius:6px;padding:10px 14px;
+  font-size:12px;color:var(--ink2);text-align:left;line-height:1.6
+}
+.divider{width:100%;max-width:420px;height:1px;background:var(--line)}
+</style>
+</head>
+<body>
+<div id="app">
+
+<!-- ── SETUP SCREEN: one clean form ── -->
+<div class="screen active" id="screen-setup">
+  <div class="wordmark">Quick<span>Match</span></div>
+  <div class="setup-sub">Live video interviews — connect with candidates instantly</div>
+
+  <!-- Role toggle: segmented control, not two separate form blocks -->
+  <div>
+    <div class="lbl" style="margin-bottom:6px">I am here to</div>
+    <div class="role-toggle">
+      <button class="role-tab" onclick="selectRole('hire',this)">
+        <span class="role-tab-title">Hire / Interview</span>
+        <span class="role-tab-sub">Meet candidates in real time</span>
+      </button>
+      <button class="role-tab" onclick="selectRole('work',this)">
+        <span class="role-tab-title">Find Work</span>
+        <span class="role-tab-sub">Get interviewed for roles</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="field">
+    <label class="lbl" for="inp-name">Your name</label>
+    <input type="text" id="inp-name" placeholder="e.g. Alex Chen">
+  </div>
+
+  <div class="field">
+    <label class="lbl" id="skills-lbl">Skills you are looking for</label>
+    <div class="tag-row">
+      <input type="text" id="tag-inp" placeholder="e.g. React, Python, Product Design" onkeydown="if(event.key==='Enter')addTag()">
+      <button class="btn-ghost" onclick="addTag()">Add</button>
+    </div>
+    <div class="tags" id="tags"></div>
+  </div>
+
+  <div class="field">
+    <label class="lbl" id="budget-lbl">Budget <span class="lbl-opt">(optional)</span></label>
+    <input type="text" id="inp-budget" placeholder="e.g. $50/hr, open to offers">
+  </div>
+
+  <button class="btn-primary" id="start-btn" disabled onclick="startSession()">Start matching</button>
+</div>
+
+<!-- ── WAITING ── -->
+<div class="screen" id="screen-waiting">
+  <div class="spin"></div>
+  <div class="wait-title" id="wait-title">Looking for a match</div>
+  <div class="wait-sub">Connecting you with someone now</div>
+  <div class="queue-pos" id="queue-pos"></div>
+  <button class="btn-link" onclick="cancelQueue()">Cancel</button>
+</div>
+
+<!-- ── ROOM ── -->
+<div class="screen" id="screen-room">
+  <div class="room-shell">
+    <div class="room-main">
+
+      <!-- Full-area peer video, self as PiP -->
+      <div class="video-main">
+
+        <!-- Peer placeholder (shown while connecting) -->
+        <div class="vm-ph" id="av-peer">
+          <div class="vm-avatar">
+            <svg class="ci" style="width:30px;height:30px;opacity:.35" viewBox="0 0 24 24">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+            </svg>
+          </div>
+          <div class="vm-name" id="av-peer-name">Connecting…</div>
+          <div class="vm-subt" id="av-peer-role">Please wait</div>
+        </div>
+
+        <!-- Peer's full video -->
+        <video id="vid-peer" autoplay playsinline style="display:none"></video>
+
+        <!-- Peer name label bottom-left -->
+        <div class="peer-label">
+          <div class="live-dot"></div>
+          <span id="vlabel-peer">—</span>
+        </div>
+
+        <!-- Self PiP bottom-right -->
+        <div class="video-pip">
+          <video id="vid-self" autoplay muted playsinline></video>
+          <div class="pip-ph" id="pip-ph">
+            <div class="pip-icon">
+              <svg class="ci" style="width:14px;height:14px;opacity:.4" viewBox="0 0 24 24">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+              </svg>
+            </div>
+          </div>
+          <div class="pip-label" id="av-self-name">You</div>
+        </div>
+      </div>
+
+      <!-- Controls -->
+      <div class="ctrl-bar">
+        <button class="ctrl-btn neutral" id="btn-mic" onclick="toggleMic()" title="Toggle microphone">
+          <svg class="ci" viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+        </button>
+        <button class="ctrl-btn neutral" id="btn-cam" onclick="toggleCam()" title="Toggle camera">
+          <svg class="ci" viewBox="0 0 24 24"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+        </button>
+        <button class="ctrl-btn neutral" onclick="openNotes()" title="Interview notes">
+          <svg class="ci" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        </button>
+        <div class="ctrl-divider"></div>
+        <button class="ctrl-btn warn" onclick="skipPeer()" title="Next candidate">
+          <svg class="ci" viewBox="0 0 24 24"><polyline points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg>
+        </button>
+        <button class="ctrl-btn danger" onclick="endCall()" title="End interview">
+          <svg class="ci" viewBox="0 0 24 24"><line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.56 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.51 16.37A5 5 0 0 1 12 15"/><path d="M12 15a5 5 0 0 1 3.49 1.37"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Sidebar: candidate info + chat -->
+    <div class="sidebar">
+      <div class="sb-head">
+        <div class="sb-eyebrow">Candidate</div>
+        <div class="sb-name" id="sb-name">—</div>
+        <div class="sb-role" id="sb-role">—</div>
+        <div id="sb-skills"></div>
+        <div class="sb-rate" id="sb-rate"></div>
+      </div>
+      <div class="sb-chat">
+        <div class="chat-msgs" id="chat-msgs"></div>
+        <div class="chat-typing" id="chat-typing"></div>
+        <div class="chat-in">
+          <input type="text" id="chat-inp" placeholder="Send a message" onkeydown="if(event.key==='Enter')sendMsg()">
+          <button class="chat-send" onclick="sendMsg()">
+            <svg style="width:14px;height:14px;stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round" viewBox="0 0 24 24">
+              <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Notes overlay -->
+<div class="overlay" id="notes-overlay" style="display:none">
+  <div class="overlay-card">
+    <div class="overlay-title">Interview notes</div>
+    <div class="overlay-sub" id="notes-sub">Add notes for this candidate</div>
+    <textarea class="notes-ta" id="notes-ta" placeholder="Communication, technical depth, culture fit, follow-up questions…"></textarea>
+    <div class="overlay-actions">
+      <button class="btn-cancel" onclick="closeNotes()">Close</button>
+      <button class="btn-save" onclick="saveNotes()">Save notes</button>
+    </div>
+  </div>
+</div>
+
+<!-- Verdict screen -->
+<div class="screen" id="screen-verdict">
+  <div class="verdict-title">How did that go?</div>
+  <div class="verdict-sub" id="verdict-sub">Rate your interview</div>
+  <div class="verdict-grid">
+    <button class="verdict-btn" onclick="setVerdict('hire',this)">
+      <div class="vb-dot" style="background:var(--green)"></div>
+      <div class="vb-title">Move forward</div><div class="vb-desc">Schedule a follow-up</div>
+    </button>
+    <button class="verdict-btn" onclick="setVerdict('pass',this)">
+      <div class="vb-dot" style="background:var(--red)"></div>
+      <div class="vb-title">Not a fit</div><div class="vb-desc">Skip to next</div>
+    </button>
+    <button class="verdict-btn" onclick="setVerdict('maybe',this)">
+      <div class="vb-dot" style="background:var(--amber)"></div>
+      <div class="vb-title">Maybe</div><div class="vb-desc">Decide later</div>
+    </button>
+    <button class="verdict-btn" onclick="setVerdict('connect',this)">
+      <div class="vb-dot" style="background:var(--accent)"></div>
+      <div class="vb-title">Just connect</div><div class="vb-desc">Exchange contacts</div>
+    </button>
+  </div>
+  <div class="divider"></div>
+  <div class="note-preview" id="note-preview" style="display:none"></div>
+  <button class="btn-primary" style="max-width:320px" onclick="nextMatch()">Next candidate</button>
+</div>
+
+</div>
+<script>
+let role=null,tags=[],micOn=true,camOn=true,localStream=null,peer=null,currentRoom=null,peerInfo={},savedNotes={},myName='',myBudget='';
+const socket=io();
+
+socket.on('queue-position',pos=>{
+  document.getElementById('queue-pos').textContent=pos>1?`${pos} people ahead of you`:'You are next';
+});
+socket.on('matched',({roomId,peer:p,initiator})=>{
+  currentRoom=roomId;peerInfo=p;
+  socket.emit('join-room',roomId);
+  updateSidebar(p);show('screen-room');initWebRTC(initiator);
+});
+socket.on('signal',({signal})=>{if(peer)peer.signal(signal);});
+socket.on('chat-msg',({text,name})=>appendMsg(text,'them',name));
+socket.on('peer-skipped',()=>{appendMsg('The other person ended the session.','them','System');setTimeout(endCall,2000);});
+
+function selectRole(r,el){
+  role=r;
+  document.querySelectorAll('.role-tab').forEach(c=>c.classList.remove('sel'));
+  el.classList.add('sel');
+  const isHire=r==='hire';
+  document.getElementById('skills-lbl').textContent=isHire?'Skills you are looking for':'Your skills';
+  const budgetLbl=document.getElementById('budget-lbl');
+  budgetLbl.innerHTML=(isHire?'Budget':'Desired rate')+' <span class="lbl-opt">(optional)</span>';
+  document.getElementById('inp-budget').placeholder=isHire?'e.g. $50/hr, open to offers':'e.g. $60/hr, negotiable';
+  checkReady();
+}
+document.getElementById('inp-name').addEventListener('input',checkReady);
+function checkReady(){document.getElementById('start-btn').disabled=!role||!document.getElementById('inp-name').value.trim();}
+
+function addTag(){
+  const v=document.getElementById('tag-inp').value.trim();
+  if(!v||tags.includes(v))return;
+  tags.push(v);document.getElementById('tag-inp').value='';renderTags();
+}
+function removeTag(t){tags=tags.filter(x=>x!==t);renderTags();}
+function renderTags(){
+  document.getElementById('tags').innerHTML=tags.map(t=>`<button class="tag" onclick="removeTag('${t}')">${t} &times;</button>`).join('');
+}
+
+async function startSession(){
+  myName=document.getElementById('inp-name').value.trim();
+  myBudget=document.getElementById('inp-budget').value.trim();
+  document.getElementById('av-self-name').textContent=myName;
+  try{
+    localStream=await navigator.mediaDevices.getUserMedia({video:true,audio:true});
+    document.getElementById('vid-self').srcObject=localStream;
+    document.getElementById('pip-ph').style.display='none';
+  }catch(e){
+    document.getElementById('pip-ph').style.display='flex';
+  }
+  show('screen-waiting');
+  socket.emit('join-queue',{role,name:myName,skills:tags,budget:myBudget});
+}
+function cancelQueue(){if(localStream){localStream.getTracks().forEach(t=>t.stop());localStream=null;}show('screen-setup');}
+
+function initWebRTC(initiator){
+  peer=new SimplePeer({
+    initiator,stream:localStream||undefined,trickle:true,
+    config:{iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}]}
+  });
+  peer.on('signal',sig=>socket.emit('signal',{roomId:currentRoom,signal:sig}));
+  peer.on('stream',remoteStream=>{
+    const v=document.getElementById('vid-peer');
+    v.srcObject=remoteStream;v.style.display='block';
+    document.getElementById('av-peer').style.display='none';
+  });
+  peer.on('error',err=>console.error('WebRTC:',err));
+}
+
+function toggleMic(){
+  micOn=!micOn;
+  if(localStream)localStream.getAudioTracks().forEach(t=>t.enabled=micOn);
+  document.getElementById('btn-mic').classList.toggle('muted',!micOn);
+}
+function toggleCam(){
+  camOn=!camOn;
+  if(localStream)localStream.getVideoTracks().forEach(t=>t.enabled=camOn);
+  document.getElementById('btn-cam').classList.toggle('muted',!camOn);
+  document.getElementById('vid-self').style.display=camOn?'block':'none';
+  document.getElementById('pip-ph').style.display=camOn?'none':'flex';
+}
+function skipPeer(){socket.emit('skip',{roomId:currentRoom});cleanup();nextMatch();}
+function endCall(){
+  socket.emit('skip',{roomId:currentRoom});cleanup();
+  document.getElementById('verdict-sub').textContent=`Rate your interview with ${peerInfo.name||'this candidate'}`;
+  const prev=document.getElementById('note-preview');
+  const n=savedNotes[peerInfo.name];
+  if(n){prev.style.display='block';prev.textContent=n;}else prev.style.display='none';
+  show('screen-verdict');
+}
+function cleanup(){
+  if(peer){peer.destroy();peer=null;}
+  const v=document.getElementById('vid-peer');v.srcObject=null;v.style.display='none';
+  document.getElementById('av-peer').style.display='flex';
+  document.getElementById('chat-msgs').innerHTML='';
+}
+function sendMsg(){
+  const inp=document.getElementById('chat-inp');
+  const text=inp.value.trim();if(!text||!currentRoom)return;
+  inp.value='';appendMsg(text,'me',myName);
+  socket.emit('chat-msg',{roomId:currentRoom,text,name:myName});
+}
+function appendMsg(text,who,name){
+  const el=document.getElementById('chat-msgs');
+  const d=document.createElement('div');d.className=`cmsg ${who}`;
+  d.innerHTML=`<span class="who">${who==='me'?'You':name}</span>${text}`;
+  el.appendChild(d);el.scrollTop=el.scrollHeight;
+}
+function openNotes(){
+  document.getElementById('notes-sub').textContent=`Notes for ${peerInfo.name||'this candidate'}`;
+  document.getElementById('notes-ta').value=savedNotes[peerInfo.name]||'';
+  document.getElementById('notes-overlay').style.display='flex';
+}
+function closeNotes(){document.getElementById('notes-overlay').style.display='none';}
+function saveNotes(){savedNotes[peerInfo.name]=document.getElementById('notes-ta').value;closeNotes();}
+function setVerdict(v,el){document.querySelectorAll('.verdict-btn').forEach(b=>b.classList.remove('chosen'));el.classList.add('chosen');}
+function nextMatch(){
+  document.querySelectorAll('.verdict-btn').forEach(b=>b.classList.remove('chosen'));
+  show('screen-waiting');
+  document.getElementById('wait-title').textContent='Finding next candidate';
+  socket.emit('join-queue',{role,name:myName,skills:tags,budget:myBudget});
+}
+function updateSidebar(p){
+  document.getElementById('sb-name').textContent=p.name||'—';
+  document.getElementById('sb-role').textContent=p.role==='hire'?'Hiring Manager':'Candidate';
+  document.getElementById('sb-rate').textContent=p.budget||'';
+  document.getElementById('sb-skills').innerHTML=(p.skills||[]).map(s=>`<span class="skill-pill">${s}</span>`).join('');
+  document.getElementById('av-peer-name').textContent=p.name||'—';
+  document.getElementById('av-peer-role').textContent=p.role||'—';
+  document.getElementById('vlabel-peer').textContent=p.name||'—';
+}
+function show(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.getElementById(id).classList.add('active');}
+</script>
+</body>
+</html>
